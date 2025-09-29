@@ -52,6 +52,195 @@
   };
 
   ////////////////////////////////////////////////////////////////////////////////
+  // Search functionality
+
+  const searchLine = document.getElementById('searchLine');
+  const searchColumn = document.getElementById('searchColumn');
+  const searchButton = document.getElementById('searchButton');
+
+  function performSearch() {
+    const lineStr = searchLine.value.trim();
+    const columnStr = searchColumn.value.trim();
+    
+    if (!lineStr) {
+      alert('Please enter a line number');
+      searchLine.focus();
+      return;
+    }
+    
+    const line = parseInt(lineStr);
+    const column = columnStr ? parseInt(columnStr) : 0;
+    
+    if (isNaN(line) || line < 1) {
+      alert('Please enter a valid line number (1 or greater)');
+      searchLine.focus();
+      searchLine.select();
+      return;
+    }
+    
+    if (isNaN(column) || column < 0) {
+      alert('Please enter a valid column number (0 or greater)');
+      searchColumn.focus();
+      searchColumn.select();
+      return;
+    }
+
+    if (!generatedTextArea) {
+      alert('No source map loaded. Please load a source map first.');
+      return;
+    }
+
+    // Convert to 0-based indexing for internal use
+    const targetLine = line - 1;
+    const targetColumn = column;
+
+    // Find the closest column and its mapping
+    function findClosestColumnAndMapping(lineIndex, targetCol) {
+      const mappings = generatedTextArea.mappings;
+      const mappingsOffset = generatedTextArea.mappingsOffset;
+      let closestColumn = -1;
+      let closestMappingIndex = -1;
+
+      // Search through all mappings for the specified line
+      for (let i = 0; i < mappings.length; i += 6) {
+        const mappingLine = mappings[i + mappingsOffset];
+        const mappingColumn = mappings[i + mappingsOffset + 1];
+        
+        if (mappingLine === lineIndex && mappingColumn <= targetCol) {
+          if (mappingColumn > closestColumn) {
+            closestColumn = mappingColumn;
+            closestMappingIndex = i;
+          }
+        }
+      }
+
+      return { column: closestColumn, mappingIndex: closestMappingIndex };
+    }
+
+    // Try to scroll to the exact position first
+    try {
+      generatedTextArea.scrollTo(targetColumn, targetLine);
+      
+      // Find the mapping for this position to set up highlighting
+      const { column: foundColumn, mappingIndex } = findClosestColumnAndMapping(targetLine, targetColumn);
+      if (mappingIndex >= 0) {
+        const mappings = generatedTextArea.mappings;
+        const mappingsOffset = generatedTextArea.mappingsOffset;
+        
+        // Create the mapping object for highlighting
+        const mapping = {
+          generatedLine: mappings[mappingIndex],
+          generatedColumn: mappings[mappingIndex + 1],
+          originalSource: mappings[mappingIndex + 2],
+          originalLine: mappings[mappingIndex + 3],
+          originalColumn: mappings[mappingIndex + 4],
+          originalName: mappings[mappingIndex + 5],
+        };
+        
+        // Calculate the proper row for highlighting
+        // For now, use a simple calculation - the highlighting system will adjust as needed
+        const row = targetLine;
+        
+        // Set the hover to trigger highlighting
+        hover = { 
+          sourceIndex: null, // null means generated code
+          lineIndex: targetLine, 
+          row: row,
+          column: foundColumn, 
+          index: foundColumn, 
+          mapping 
+        };
+        
+        // If there's an original mapping, navigate to it
+        if (mapping.originalSource !== -1 && originalTextArea) {
+          if (originalTextArea.sourceIndex !== mapping.originalSource) {
+            fileList.selectedIndex = mapping.originalSource;
+            fileList.onchange().then(() => {
+              originalTextArea.scrollTo(mapping.originalColumn, mapping.originalLine);
+            });
+          } else {
+            originalTextArea.scrollTo(mapping.originalColumn, mapping.originalLine);
+          }
+        }
+        
+        // Trigger a redraw to show the highlighting
+        isInvalid = true;
+      }
+      
+    } catch (e) {
+      // If exact position fails, try to find the closest column
+      const { column: closestColumn, mappingIndex } = findClosestColumnAndMapping(targetLine, targetColumn);
+      
+      if (closestColumn >= 0) {
+        try {
+          generatedTextArea.scrollTo(closestColumn, targetLine);
+          
+          // Set up highlighting for the closest column
+          if (mappingIndex >= 0) {
+            const mappings = generatedTextArea.mappings;
+            const mappingsOffset = generatedTextArea.mappingsOffset;
+            
+            const mapping = {
+              generatedLine: mappings[mappingIndex],
+              generatedColumn: mappings[mappingIndex + 1],
+              originalSource: mappings[mappingIndex + 2],
+              originalLine: mappings[mappingIndex + 3],
+              originalColumn: mappings[mappingIndex + 4],
+              originalName: mappings[mappingIndex + 5],
+            };
+            
+            hover = { 
+              sourceIndex: null,
+              lineIndex: targetLine, 
+              row: targetLine,
+              column: closestColumn, 
+              index: closestColumn, 
+              mapping 
+            };
+            
+            // Navigate to original code if available
+            if (mapping.originalSource !== -1 && originalTextArea) {
+              if (originalTextArea.sourceIndex !== mapping.originalSource) {
+                fileList.selectedIndex = mapping.originalSource;
+                fileList.onchange().then(() => {
+                  originalTextArea.scrollTo(mapping.originalColumn, mapping.originalLine);
+                });
+              } else {
+                originalTextArea.scrollTo(mapping.originalColumn, mapping.originalLine);
+              }
+            }
+            
+            isInvalid = true;
+          }
+          
+          if (closestColumn !== targetColumn) {
+            console.log(`Column ${targetColumn} not found on line ${line}. Using closest column ${closestColumn}.`);
+          }
+        } catch (e2) {
+          alert(`Line ${line} not found in the generated code.`);
+        }
+      } else {
+        alert(`Line ${line} not found in the generated code.`);
+      }
+    }
+  }
+
+  searchButton.onclick = performSearch;
+
+  // Allow Enter key to trigger search
+  searchLine.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      performSearch();
+    }
+  };
+
+  searchColumn.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      performSearch();
+    }
+  };
+
+  ////////////////////////////////////////////////////////////////////////////////
   // Loading
 
   const utf8ToUTF16 = x => decodeURIComponent(escape(x));
@@ -84,6 +273,7 @@
     toolbar.style.display = 'none';
     statusBar.style.display = 'none';
     canvas.style.display = 'none';
+    document.getElementById('searchControls').style.display = 'none';
   }
 
   function showLoadingError(text) {
@@ -606,6 +796,7 @@
     toolbar.style.display = 'flex';
     statusBar.style.display = 'flex';
     canvas.style.display = 'block';
+    document.getElementById('searchControls').style.display = 'flex';
     originalStatus.textContent = generatedStatus.textContent = '';
     fileList.innerHTML = '';
     const option = document.createElement('option');
@@ -1295,6 +1486,8 @@
     return {
       sourceIndex,
       bounds,
+      mappings,
+      mappingsOffset,
 
       updateAfterWrapChange() {
         scrollX = 0;

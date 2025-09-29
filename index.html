@@ -36,6 +36,13 @@
     </section>
     <section>
       <h2>Generated&nbsp;code</h2>
+      <div id="searchControls" title="Search in generated code panel only">
+        <label for="searchLine">Line:</label>
+        <input id="searchLine" type="number" min="1" placeholder="Line" title="Line number in generated code (1-based)" />
+        <label for="searchColumn">Column:</label>
+        <input id="searchColumn" type="number" min="0" placeholder="Column" title="Column number (0-based). Uses closest available column if exact match not found." />
+        <button id="searchButton" title="Navigate to the specified line and column in generated code">Go</button>
+      </div>
     </section>
   </div>
   <div id="statusBar">
