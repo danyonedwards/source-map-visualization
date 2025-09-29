@@ -241,6 +241,241 @@
   };
 
   ////////////////////////////////////////////////////////////////////////////////
+  // Stack trace parsing functionality
+
+  const stackTraceInput = document.getElementById('stackTraceInput');
+  const parseStackTraceButton = document.getElementById('parseStackTraceButton');
+
+  // Store mapping data for hover functionality
+  let stackTraceMappings = [];
+
+  function parseStackTrace() {
+    const stackTraceText = stackTraceInput.value.trim();
+    
+    if (!stackTraceText) {
+      return;
+    }
+
+    if (!generatedTextArea || !originalTextArea) {
+      return;
+    }
+
+    // Process each line of the stack trace
+    const lines = stackTraceText.split('\n');
+    const processedLines = [];
+    stackTraceMappings = []; // Reset mappings
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex];
+      // Extract URLs with line and column numbers from this line
+      const urlPattern = /(webpack:\/\/\/[^\s]+|https?:\/\/[^\s]+\.(?:js|ts|jsx|tsx|mjs|cjs)|[^\s]+\.(?:js|ts|jsx|tsx|mjs|cjs))(?::(\d+)(?::(\d+))?)?/g;
+      let processedLine = line;
+      let match;
+
+      while ((match = urlPattern.exec(line)) !== null) {
+        const [fullMatch, url, lineStr, columnStr] = match;
+        const lineNum = lineStr ? parseInt(lineStr) : null;
+        const columnNum = columnStr ? parseInt(columnStr) : null;
+
+        if (lineNum !== null) {
+          // Try to map to original source
+          const mapped = mapToOriginalSource(lineNum, columnNum);
+          if (mapped) {
+            // Use the same filename approach as the original code
+            const sourceFilePath = currentSourceMap.sources && currentSourceMap.sources[mapped.sourceIndex] 
+              ? currentSourceMap.sources[mapped.sourceIndex].name 
+              : 'unknown';
+            
+            // Replace the URL with original source info using the same filename as original code
+            const originalInfo = `${mapped.name || 'unnamed'} (${sourceFilePath}:${mapped.line}${mapped.column ? ':' + mapped.column : ''})`;
+            processedLine = processedLine.replace(fullMatch, originalInfo);
+            
+            // Store mapping data for hover functionality
+            stackTraceMappings.push({
+              lineIndex: lineIndex,
+              originalLine: line,
+              processedLine: processedLine,
+              mapped: mapped,
+              sourceFilePath: sourceFilePath
+            });
+          }
+        }
+      }
+
+      processedLines.push(processedLine);
+    }
+
+    // Update the results panel with the processed stack trace
+    const resultsPanel = document.getElementById('stackTraceResults');
+    resultsPanel.textContent = processedLines.join('\n');
+  }
+
+  function mapToOriginalSource(line, column) {
+    if (!generatedTextArea || !generatedTextArea.mappings) {
+      return null;
+    }
+
+    const mappings = generatedTextArea.mappings;
+    const mappingsOffset = generatedTextArea.mappingsOffset;
+    
+    // Convert to 0-based indexing
+    const targetLine = line - 1;
+    const targetColumn = column || 0;
+
+    // Find the closest mapping for this position
+    let bestMapping = null;
+    let bestColumn = -1;
+
+    for (let i = 0; i < mappings.length; i += 6) {
+      const mappingLine = mappings[i + mappingsOffset];
+      const mappingColumn = mappings[i + mappingsOffset + 1];
+      
+      if (mappingLine === targetLine && mappingColumn <= targetColumn) {
+        if (mappingColumn > bestColumn) {
+          bestColumn = mappingColumn;
+          bestMapping = {
+            generatedLine: mappings[i],
+            generatedColumn: mappings[i + 1],
+            originalSource: mappings[i + 2],
+            originalLine: mappings[i + 3],
+            originalColumn: mappings[i + 4],
+            originalName: mappings[i + 5],
+          };
+        }
+      }
+    }
+
+    if (bestMapping && bestMapping.originalSource !== -1) {
+      return {
+        sourceIndex: bestMapping.originalSource,
+        line: bestMapping.originalLine + 1, // Convert back to 1-based
+        column: bestMapping.originalColumn,
+        name: bestMapping.originalName !== -1 ? currentSourceMap.names[bestMapping.originalName] : null
+      };
+    }
+
+    return null;
+  }
+
+
+  parseStackTraceButton.onclick = parseStackTrace;
+
+  // Add hover functionality to the results panel
+  const stackTraceResults = document.getElementById('stackTraceResults');
+  
+  stackTraceResults.addEventListener('mouseover', (e) => {
+    // Find which line the mouse is over
+    const rect = stackTraceResults.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    
+    // Account for padding and get more accurate line height
+    const computedStyle = window.getComputedStyle(stackTraceResults);
+    const paddingTop = parseInt(computedStyle.paddingTop) || 8;
+    const lineHeight = parseInt(computedStyle.lineHeight) || 13;
+    
+    // Calculate line index accounting for padding
+    const adjustedY = y - paddingTop;
+    const lineIndex = Math.max(0, Math.floor(adjustedY / lineHeight));
+    
+    // Find mapping for this line
+    const mapping = stackTraceMappings.find(m => m.lineIndex === lineIndex);
+    
+    if (mapping && mapping.mapped) {
+      // Navigate to the original source in the top left panel
+      if (originalTextArea && mapping.mapped.sourceIndex !== -1) {
+        // Switch to the correct source file if needed
+        if (originalTextArea.sourceIndex !== mapping.mapped.sourceIndex) {
+          fileList.selectedIndex = mapping.mapped.sourceIndex;
+          fileList.onchange().then(() => {
+            originalTextArea.scrollTo(mapping.mapped.column, mapping.mapped.line - 1);
+          });
+        } else {
+          originalTextArea.scrollTo(mapping.mapped.column, mapping.mapped.line - 1);
+        }
+        
+        // Set up highlighting
+        const mappingData = {
+          generatedLine: mapping.mapped.generatedLine,
+          generatedColumn: mapping.mapped.generatedColumn,
+          originalSource: mapping.mapped.sourceIndex,
+          originalLine: mapping.mapped.line - 1,
+          originalColumn: mapping.mapped.column,
+          originalName: mapping.mapped.name ? currentSourceMap.names.indexOf(mapping.mapped.name) : -1,
+        };
+        
+        hover = {
+          sourceIndex: mapping.mapped.sourceIndex,
+          lineIndex: mapping.mapped.line - 1,
+          row: mapping.mapped.line - 1,
+          column: mapping.mapped.column,
+          index: mapping.mapped.column,
+          mapping: mappingData
+        };
+        
+        isInvalid = true;
+      }
+    }
+  });
+  
+  stackTraceResults.addEventListener('mouseout', (e) => {
+    // Clear highlighting when mouse leaves
+    hover = null;
+    isInvalid = true;
+  });
+
+  // Add keyboard shortcut to focus stack trace input (Ctrl+Shift+S)
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+      e.preventDefault();
+      if (document.getElementById('stackTracePanel').style.display !== 'none') {
+        stackTraceInput.focus();
+      }
+    }
+  });
+
+  // Toggle functionality for stack trace panel
+  const toggleStackTracePanel = document.getElementById('toggleStackTracePanel');
+  const stackTracePanel = document.getElementById('stackTracePanel');
+  const stackTraceHeader = document.getElementById('stackTraceHeader');
+
+  function toggleStackTracePanelState() {
+    stackTracePanelCollapsed = !stackTracePanelCollapsed;
+    if (stackTracePanelCollapsed) {
+      stackTracePanel.classList.add('collapsed');
+      toggleStackTracePanel.textContent = '+';
+    } else {
+      stackTracePanel.classList.remove('collapsed');
+      toggleStackTracePanel.textContent = '−';
+    }
+    // Trigger a redraw to update canvas bounds
+    isInvalid = true;
+  }
+
+  toggleStackTracePanel.onclick = (e) => {
+    e.stopPropagation();
+    toggleStackTracePanelState();
+  };
+
+  stackTraceHeader.onclick = toggleStackTracePanelState;
+
+  // Prevent mouse events from reaching underlying panels when stack trace panel is visible
+  stackTracePanel.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+  });
+  
+  stackTracePanel.addEventListener('mouseup', (e) => {
+    e.stopPropagation();
+  });
+  
+  stackTracePanel.addEventListener('mousemove', (e) => {
+    e.stopPropagation();
+  });
+  
+  stackTracePanel.addEventListener('wheel', (e) => {
+    e.stopPropagation();
+  });
+
+  ////////////////////////////////////////////////////////////////////////////////
   // Loading
 
   const utf8ToUTF16 = x => decodeURIComponent(escape(x));
@@ -274,6 +509,7 @@
     statusBar.style.display = 'none';
     canvas.style.display = 'none';
     document.getElementById('searchControls').style.display = 'none';
+    document.getElementById('stackTracePanel').style.display = 'none';
   }
 
   function showLoadingError(text) {
@@ -316,11 +552,12 @@
       try {
         // Use "new URL" to ensure that the URL has a protocol (e.g. "data:" or "https:")
         map = await fetch(new URL(url)).then(r => r.text());
+        finishLoading(code, map);
       } catch (e) {
-        showLoadingError(`Failed to parse the URL in the "/${match[1]}# sourceMappingURL=" comment: ${e && e.message || e}`);
-        return;
+        // If URL parsing fails, just load the code without the source map
+        console.log(`Could not parse sourceMappingURL: ${e && e.message || e}`);
+        finishLoading(code, null);
       }
-      finishLoading(code, map);
     }
 
     else if (file && isProbablySourceMap(file)) {
@@ -330,7 +567,10 @@
 
     else {
       const c = file && file.name.endsWith('ss') ? '*' : '/';
-      showLoadingError(`Failed to find an embedded "/${c}# sourceMappingURL=" comment in the ${file ? 'imported file' : 'pasted text'}.`);
+      const errorMsg = file 
+        ? `Failed to find an embedded "/${c}# sourceMappingURL=" comment in the imported file.`
+        : `Failed to find an embedded "/${c}# sourceMappingURL=" comment in the pasted text. If you pasted a stack trace, please load a source map first, then paste the stack trace into the Stack Trace Parser panel.`;
+      showLoadingError(errorMsg);
     }
   }
 
@@ -374,8 +614,34 @@
   document.body.addEventListener('paste', e => {
     e.preventDefault();
     const code = e.clipboardData.getData('text/plain');
-    finishLoadingCodeWithEmbeddedSourceMap(code, null);
+    
+    // Check if the pasted text looks like a stack trace
+    if (isStackTrace(code)) {
+      // If stack trace panel is visible, paste into it
+      if (document.getElementById('stackTracePanel').style.display !== 'none') {
+        const stackTraceInput = document.getElementById('stackTraceInput');
+        stackTraceInput.value = code;
+        stackTraceInput.focus();
+      } else {
+        alert('Please load a source map first, then paste the stack trace into the Stack Trace Parser panel.');
+      }
+    } else {
+      // Otherwise, treat as source map code
+      finishLoadingCodeWithEmbeddedSourceMap(code, null);
+    }
   });
+
+  function isStackTrace(text) {
+    // Check if text contains stack trace patterns
+    const stackTracePatterns = [
+      /at\s+\w+\s*\(/g,  // "at functionName ("
+      /at\s+<anonymous>/g,  // "at <anonymous>"
+      /\.js:\d+:\d+/g,  // "file.js:123:45"
+      /https?:\/\/[^\s]+\.js:\d+:\d+/g  // "https://domain.com/file.js:123:45"
+    ];
+    
+    return stackTracePatterns.some(pattern => pattern.test(text));
+  }
 
   // Accelerate VLQ decoding with a lookup table
   const vlqTable = new Uint8Array(128);
@@ -797,6 +1063,7 @@
     statusBar.style.display = 'flex';
     canvas.style.display = 'block';
     document.getElementById('searchControls').style.display = 'flex';
+    document.getElementById('stackTracePanel').style.display = 'block';
     originalStatus.textContent = generatedStatus.textContent = '';
     fileList.innerHTML = '';
     const option = document.createElement('option');
@@ -811,6 +1078,7 @@
     // Let the browser update before parsing the source map, which may be slow
     await waitForDOM();
     const sm = parseSourceMap(map);
+    currentSourceMap = sm;
 
     // Show a progress bar if this is is going to take a while
     let charsSoFar = 0;
@@ -850,11 +1118,13 @@
           otherSource,
           originalName,
           bounds() {
+            const stackTraceHeight = stackTracePanel.style.display === 'none' ? 0 : 
+              (stackTracePanelCollapsed ? 32 : Math.min(innerHeight * 0.5, 300));
             return {
               x: 0,
               y: toolbarHeight,
               width: (innerWidth >>> 1) - (splitterWidth >> 1),
-              height: innerHeight - toolbarHeight - statusBarHeight,
+              height: innerHeight - toolbarHeight - statusBarHeight - stackTraceHeight,
             };
           },
         });
@@ -876,11 +1146,13 @@
       originalName,
       bounds() {
         const x = (innerWidth >> 1) + ((splitterWidth + 1) >> 1);
+        const stackTraceHeight = stackTracePanel.style.display === 'none' ? 0 : 
+          (stackTracePanelCollapsed ? 32 : Math.min(innerHeight * 0.5, 300));
         return {
           x,
           y: toolbarHeight,
           width: innerWidth - x,
-          height: innerHeight - toolbarHeight - statusBarHeight,
+          height: innerHeight - toolbarHeight - statusBarHeight - stackTraceHeight,
         };
       },
     });
@@ -969,6 +1241,8 @@
   let originalTextArea;
   let generatedTextArea;
   let hover = null;
+  let currentSourceMap = null;
+  let stackTracePanelCollapsed = false;
 
   const wrapCheckbox = document.getElementById('wrap');
   let wrap = true;

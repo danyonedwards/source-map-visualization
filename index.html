@@ -58,6 +58,30 @@
       </label>
     </section>
   </div>
+  <div id="stackTracePanel">
+    <div id="stackTraceHeader">
+      <h3>Stack Trace Parser</h3>
+      <button id="toggleStackTracePanel" title="Toggle stack trace panel">−</button>
+    </div>
+    <div id="stackTraceContent">
+      <div id="stackTraceControls">
+        <label for="stackTraceInput">Paste minified stack trace (Ctrl+Shift+S to focus):</label>
+        <div id="stackTraceInputContainer">
+          <div id="stackTraceInputWrapper">
+            <textarea id="stackTraceInput" placeholder="Paste minified stack trace here, e.g.:
+    at div (&lt;anonymous&gt;)
+    at __c.Sc (https://static.canva.com/web/2abc51893c519d93.js:2444:387)
+    at main (&lt;anonymous&gt;)
+    at https://static.canva.com/web/274cd0da28712ee1.1ul071.vendor.js:2:71510
+
+Click 'Map to Original Source' to see results." title="Paste a minified stack trace to map URLs to original source"></textarea>
+          </div>
+          <div id="stackTraceResults" title="Hover over mapped lines to see source code in the top panel"></div>
+        </div>
+        <button id="parseStackTraceButton" title="Map URLs to original source and show results">Map to Original Source</button>
+      </div>
+    </div>
+  </div>
   <div id="theme">
     <svg id="theme-light" width="25" height="25" xmlns="http://www.w3.org/2000/svg">
       <path d="M13.5 4v3m9.5 6.5h-3M13.5 23v-3M7 13.5H4M9 9L7 7m13 0l-2 2m2 11l-2-2M7 20l2-2"></path>
